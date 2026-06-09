@@ -40,6 +40,17 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Temporary seed endpoint
+app.get('/api/seed', (req, res) => {
+  require('child_process').exec('npm run seed', (err, stdout, stderr) => {
+    if (err) {
+      return res.status(500).send(`<pre>Error: ${err.message}\n\n${stderr}</pre>`);
+    }
+    res.send(`<h1>Database Seeded Successfully!</h1><pre>${stdout}</pre><p>You can now log in using admin@wesolve.com / admin123</p>`);
+  });
+});
+
+
 // Error handler
 app.use(errorHandler);
 
