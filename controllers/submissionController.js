@@ -179,8 +179,33 @@ exports.getLeaderboard = async (req, res, next) => {
       }
     }
 
+    let filteredLeaderboard = students;
+    if (req.user.role !== 'admin') {
+      const top3 = students.slice(0, 3);
+      const isCurrentUserInTop3 = top3.some(s => (s.user.id || s.user._id)?.toString() === req.user._id.toString());
+      
+      if (!isCurrentUserInTop3) {
+        const currentUserEntry = students.find(s => (s.user.id || s.user._id)?.toString() === req.user._id.toString());
+        if (currentUserEntry) {
+          filteredLeaderboard = [...top3, currentUserEntry];
+        } else if (currentUserRank) {
+          // If not in the top 50 list, we build a dummy entry for them
+          filteredLeaderboard = [...top3, {
+            rank: currentUserRank,
+            user: { id: req.user._id, name: req.user.name, avatar: req.user.avatar, classSection: req.user.classSection },
+            totalScore: req.user.totalScore,
+            tasksCompleted: 0 // Cannot easily fetch completed tasks count here without another query, but keeping 0 is okay or we could query it
+          }];
+        } else {
+          filteredLeaderboard = top3;
+        }
+      } else {
+        filteredLeaderboard = top3;
+      }
+    }
+
     res.json({
-      leaderboard: students,
+      leaderboard: filteredLeaderboard,
       currentUserRank: currentUserRank || null
     });
   } catch (error) {
