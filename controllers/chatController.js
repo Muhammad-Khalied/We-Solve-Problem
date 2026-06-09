@@ -19,6 +19,10 @@ exports.sendChatMessage = async (req, res, next) => {
       });
     }
 
+    if (chatHistory.hintLevel < 3) {
+      return res.status(400).json({ message: 'You must use all 3 hints before unlocking the AI Tutor.' });
+    }
+
     chatHistory.messages.push({ role: 'user', content: message });
 
     const aiResponse = await sendMessage(
