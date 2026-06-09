@@ -99,7 +99,8 @@ exports.getMyStats = async (req, res, next) => {
 exports.getLeaderboard = async (req, res, next) => {
   try {
     const { subjectId } = req.query;
-    let students;
+    let students = [];
+    let currentUserRank = null;
 
     if (subjectId) {
       const skills = await Skill.find({ subject: subjectId });
@@ -110,6 +111,7 @@ exports.getLeaderboard = async (req, res, next) => {
       const submissions = await Submission.aggregate([
         { $match: { task: { $in: taskIds }, status: 'passed' } },
         { $group: { _id: '$user', totalScore: { $sum: '$score' }, tasksCompleted: { $sum: 1 } } },
+        { $match: { totalScore: { $gt: 0 } } },
         { $sort: { totalScore: -1 } },
         { $limit: 50 }
       ]);
@@ -119,58 +121,76 @@ exports.getLeaderboard = async (req, res, next) => {
       const userMap = {};
       users.forEach(u => { userMap[u._id.toString()] = u; });
 
-      students = submissions.map((s, index) => ({
-        rank: index + 1,
-        user: userMap[s._id.toString()],
-        totalScore: s.totalScore,
-        tasksCompleted: s.tasksCompleted
-      }));
+      let currentRank = 1;
+      let lastScore = -1;
+      students = submissions.map((s, index) => {
+        if (s.totalScore !== lastScore) {
+          currentRank = index + 1;
+          lastScore = s.totalScore;
+        }
+        return {
+          rank: currentRank,
+          user: userMap[s._id.toString()],
+          totalScore: s.totalScore,
+          tasksCompleted: s.tasksCompleted
+        };
+      });
+
+      // Find current user rank for this subject if not in top 50 but > 0 score
+      const userEntry = students.find(s => s.user && s.user._id.toString() === req.user._id.toString());
+      if (userEntry) {
+        currentUserRank = userEntry.rank;
+      } else {
+        const allSubmissions = await Submission.aggregate([
+          { $match: { task: { $in: taskIds }, status: 'passed', user: req.user._id } },
+          { $group: { _id: '$user', totalScore: { $sum: '$score' } } }
+        ]);
+        if (allSubmissions.length > 0 && allSubmissions[0].totalScore > 0) {
+          const higherScoreCount = await Submission.aggregate([
+            { $match: { task: { $in: taskIds }, status: 'passed' } },
+            { $group: { _id: '$user', totalScore: { $sum: '$score' } } },
+            { $match: { totalScore: { $gt: allSubmissions[0].totalScore } } },
+            { $count: "count" }
+          ]);
+          currentUserRank = higherScoreCount.length > 0 ? higherScoreCount[0].count + 1 : 1;
+        }
+      }
+
     } else {
-      const rawStudents = await User.find({ role: 'student' })
+      const rawStudents = await User.find({ role: 'student', totalScore: { $gt: 0 } })
         .select('name avatar classSection totalScore')
         .sort('-totalScore')
         .limit(50);
 
+      let currentRank = 1;
+      let lastScore = -1;
+      const rankedRawStudents = rawStudents.map((student, index) => {
+        if (student.totalScore !== lastScore) {
+          currentRank = index + 1;
+          lastScore = student.totalScore;
+        }
+        return { ...student.toObject(), calculatedRank: currentRank };
+      });
+
       students = await Promise.all(
-        rawStudents.map(async (student, index) => {
+        rankedRawStudents.map(async (student) => {
           const tasksCompleted = await Submission.countDocuments({
             user: student._id,
             status: 'passed'
           });
           return {
-            rank: index + 1,
+            rank: student.calculatedRank,
             user: { id: student._id, name: student.name, avatar: student.avatar, classSection: student.classSection },
             totalScore: student.totalScore,
             tasksCompleted
           };
         })
       );
-    }
 
-    let currentUserRank = students.findIndex(s =>
-      (s.user.id || s.user._id)?.toString() === req.user._id.toString()
-    ) + 1;
-
-    // If current user is not in the top 50, calculate their actual rank
-    if (!currentUserRank) {
-      if (subjectId) {
-        // Find rank for this specific subject
-        const skills = await Skill.find({ subject: subjectId });
-        const skillIds = skills.map(s => s._id);
-        const tasks = await Task.find({ skill: { $in: skillIds } });
-        const taskIds = tasks.map(t => t._id);
-
-        const allSubmissions = await Submission.aggregate([
-          { $match: { task: { $in: taskIds }, status: 'passed' } },
-          { $group: { _id: '$user', totalScore: { $sum: '$score' } } },
-          { $sort: { totalScore: -1 } }
-        ]);
-        const userIndex = allSubmissions.findIndex(s => s._id.toString() === req.user._id.toString());
-        if (userIndex !== -1) {
-          currentUserRank = userIndex + 1;
-        }
-      } else {
-        // Find overall rank based on totalScore
+      const userEntry = students.find(s => s.user && s.user.id.toString() === req.user._id.toString());
+      if (userEntry) {
+        currentUserRank = userEntry.rank;
+      } else if (req.user.totalScore > 0) {
         const higherScoreCount = await User.countDocuments({
           role: 'student',
           totalScore: { $gt: req.user.totalScore }
@@ -182,19 +202,24 @@ exports.getLeaderboard = async (req, res, next) => {
     let filteredLeaderboard = students;
     if (req.user.role !== 'admin') {
       const top3 = students.slice(0, 3);
-      const isCurrentUserInTop3 = top3.some(s => (s.user.id || s.user._id)?.toString() === req.user._id.toString());
+      const isCurrentUserInTop3 = top3.some(s => {
+        const sid = s.user.id || s.user._id;
+        return sid && sid.toString() === req.user._id.toString();
+      });
       
       if (!isCurrentUserInTop3) {
-        const currentUserEntry = students.find(s => (s.user.id || s.user._id)?.toString() === req.user._id.toString());
+        const currentUserEntry = students.find(s => {
+          const sid = s.user.id || s.user._id;
+          return sid && sid.toString() === req.user._id.toString();
+        });
         if (currentUserEntry) {
           filteredLeaderboard = [...top3, currentUserEntry];
         } else if (currentUserRank) {
-          // If not in the top 50 list, we build a dummy entry for them
           filteredLeaderboard = [...top3, {
             rank: currentUserRank,
             user: { id: req.user._id, name: req.user.name, avatar: req.user.avatar, classSection: req.user.classSection },
             totalScore: req.user.totalScore,
-            tasksCompleted: 0 // Cannot easily fetch completed tasks count here without another query, but keeping 0 is okay or we could query it
+            tasksCompleted: 0
           }];
         } else {
           filteredLeaderboard = top3;
