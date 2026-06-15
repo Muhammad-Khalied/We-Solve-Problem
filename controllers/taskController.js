@@ -3,7 +3,9 @@ const Submission = require('../models/Submission');
 const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
 const { runTestCases, executeCode } = require('../services/judgeService');
-const { trackEvent } = require('../services/eventService');
+const { trackEvent, getEvents, countEvents } = require('../services/eventService');
+const AnalysisResult = require('../models/AnalysisResult');
+const { evaluateStudentSkills, generateFeedback, PROMPT_VERSION } = require('../services/analyticsAIService');
 
 // @desc    Get single task (full details)
 // @route   GET /api/tasks/:id
@@ -247,6 +249,69 @@ exports.submitTask = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get AI feedback for a solved task (student-facing)
+// @route   POST /api/tasks/:id/feedback
+exports.getStudentAIFeedback = async (req, res, next) => {
+  try {
+    const taskId = req.params.id;
+    const userId = req.user._id;
+
+    // 1. Verify the task exists
+    const task = await Task.findById(taskId);
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+
+    // 2. Verify the student has solved the task
+    const bestSubmission = await Submission.findOne({ user: userId, task: taskId }).sort('-score');
+    if (!bestSubmission || bestSubmission.status !== 'passed') {
+      return res.status(403).json({ message: 'You must pass the task before requesting AI feedback.' });
+    }
+
+    // 3. Check for cached feedback that is fresh
+    const currentEventCount = await countEvents(userId, taskId);
+    const existingFeedback = await AnalysisResult.findOne({ user: userId, task: taskId, type: 'feedback' });
+    
+    if (existingFeedback && existingFeedback.eventCountAtAnalysis >= currentEventCount && currentEventCount > 0) {
+      return res.json({ feedback: existingFeedback.result, cached: true });
+    }
+
+    // 4. Generate feedback if not cached or stale
+    const [chatHistory, events] = await Promise.all([
+      ChatHistory.findOne({ user: userId, task: taskId }),
+      getEvents(userId, taskId)
+    ]);
+
+    const conversation = chatHistory?.messages || [];
+    const hintHistory = task.hints?.slice(0, chatHistory?.hintLevel || 0) || [];
+    const studentCode = bestSubmission.code || '';
+
+    // First evaluate skills (needed for feedback)
+    const skillEvalResult = await evaluateStudentSkills(task, studentCode, conversation, hintHistory, events);
+    
+    // Then generate feedback
+    const feedbackResult = await generateFeedback(task, studentCode, conversation, skillEvalResult);
+
+    // Save to AnalysisResult (update both skills and feedback caches)
+    const now = new Date();
+    await Promise.all([
+      AnalysisResult.findOneAndUpdate(
+        { user: userId, task: taskId, type: 'skill_evaluation' },
+        { result: skillEvalResult, promptVersion: PROMPT_VERSION, analyzedAt: now, eventCountAtAnalysis: currentEventCount },
+        { upsert: true, new: true }
+      ),
+      AnalysisResult.findOneAndUpdate(
+        { user: userId, task: taskId, type: 'feedback' },
+        { result: feedbackResult, promptVersion: PROMPT_VERSION, analyzedAt: now, eventCountAtAnalysis: currentEventCount },
+        { upsert: true, new: true }
+      )
+    ]);
+
+    res.json({ feedback: feedbackResult, cached: false });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 /**
  * Calculate score based on base points, hints used, and attempt number.
