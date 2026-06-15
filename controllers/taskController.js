@@ -3,6 +3,7 @@ const Submission = require('../models/Submission');
 const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
 const { runTestCases, executeCode } = require('../services/judgeService');
+const { trackEvent } = require('../services/eventService');
 
 // @desc    Get single task (full details)
 // @route   GET /api/tasks/:id
@@ -68,6 +69,22 @@ exports.runCode = async (req, res, next) => {
     }
 
     const result = await executeCode(code, task.language, input || '');
+
+    const hasError = !!(result.stderr || result.compile_output);
+
+    // Track code run event
+    await trackEvent(req.user._id, task._id, 'CODE_RUN', {
+      hasError,
+      executionTime: result.time
+    });
+
+    // Track error if found
+    if (hasError) {
+      await trackEvent(req.user._id, task._id, 'ERROR_FOUND', {
+        errorType: result.compile_output ? 'compilation' : 'runtime',
+        errorMessage: (result.stderr || result.compile_output || '').substring(0, 200)
+      });
+    }
 
     res.json({
       output: result.stdout,
@@ -197,6 +214,35 @@ exports.submitTask = async (req, res, next) => {
       },
       totalScore
     });
+
+    // Track submission event (after response, non-blocking)
+    trackEvent(req.user._id, task._id, 'CODE_SUBMITTED', {
+      status,
+      score,
+      attempt: submission.attempts,
+      testsPassed: testResults.filter(r => r.passed).length,
+      totalTests: testResults.length,
+      hintsUsed,
+      taskType: task.type
+    }).catch(() => {});
+
+    // Track solution completed if passed
+    if (status === 'passed') {
+      trackEvent(req.user._id, task._id, 'SOLUTION_COMPLETED', {
+        score,
+        attempts: submission.attempts,
+        hintsUsed
+      }).catch(() => {});
+    }
+
+    // Track errors in failed submissions
+    if (status === 'failed' && task.type === 'code') {
+      trackEvent(req.user._id, task._id, 'ERROR_FOUND', {
+        errorType: 'wrong_answer',
+        testsPassed: testResults.filter(r => r.passed).length,
+        totalTests: testResults.length
+      }).catch(() => {});
+    }
   } catch (error) {
     next(error);
   }

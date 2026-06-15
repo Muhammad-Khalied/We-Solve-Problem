@@ -1,6 +1,7 @@
 const ChatHistory = require('../models/ChatHistory');
 const Task = require('../models/Task');
 const { sendMessage } = require('../services/geminiService');
+const { trackEvent } = require('../services/eventService');
 
 // @desc    Send message to AI tutor
 // @route   POST /api/chat/:taskId
@@ -36,6 +37,13 @@ exports.sendChatMessage = async (req, res, next) => {
 
     chatHistory.messages.push({ role: 'assistant', content: aiResponse });
     await chatHistory.save();
+
+    // Track chat message event
+    await trackEvent(req.user._id, task._id, 'CHAT_MESSAGE', {
+      messageLength: message.length,
+      hintLevel: chatHistory.hintLevel,
+      aiChatCount: chatHistory.aiChatCount
+    });
 
     res.json({ response: aiResponse, hintLevel: chatHistory.hintLevel, aiChatCount: chatHistory.aiChatCount });
   } catch (error) {
@@ -82,6 +90,12 @@ exports.requestHint = async (req, res, next) => {
     chatHistory.messages.push({ role: 'user', content: `[Hint ${chatHistory.hintLevel} requested]` });
     chatHistory.messages.push({ role: 'assistant', content: `💡 **Hint ${chatHistory.hintLevel}:** ${hintText}` });
     await chatHistory.save();
+
+    // Track hint usage event
+    await trackEvent(req.user._id, task._id, 'HINT_USED', {
+      hintLevel: chatHistory.hintLevel,
+      hintText
+    });
 
     res.json({
       hint: hintText,

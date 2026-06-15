@@ -34,6 +34,8 @@ app.use('/api/tasks', require('./routes/taskRoutes'));
 app.use('/api/submissions', require('./routes/submissionRoutes'));
 app.use('/api/chat', require('./routes/chatRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/events', require('./routes/eventRoutes'));
+app.use('/api/analytics', require('./routes/analyticsRoutes'));
 
 // Health check
 app.get('/api/health', (req, res) => {
