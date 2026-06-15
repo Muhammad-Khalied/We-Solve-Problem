@@ -33,6 +33,12 @@ const chatHistorySchema = new mongoose.Schema({
     default: 0,
     min: 0,
     max: 3
+  },
+  aiChatCount: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 3
   }
 }, {
   timestamps: true

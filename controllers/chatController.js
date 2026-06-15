@@ -15,7 +15,7 @@ exports.sendChatMessage = async (req, res, next) => {
     });
     if (!chatHistory) {
       chatHistory = await ChatHistory.create({
-        user: req.user._id, task: task._id, messages: [], hintLevel: 0
+        user: req.user._id, task: task._id, messages: [], hintLevel: 0, aiChatCount: 0
       });
     }
 
@@ -23,7 +23,12 @@ exports.sendChatMessage = async (req, res, next) => {
       return res.status(400).json({ message: 'You must use all 3 hints before unlocking the AI Tutor.' });
     }
 
+    if (chatHistory.aiChatCount >= 3) {
+      return res.status(400).json({ message: 'You have reached the maximum of 3 AI chats.' });
+    }
+
     chatHistory.messages.push({ role: 'user', content: message });
+    chatHistory.aiChatCount += 1;
 
     const aiResponse = await sendMessage(
       task, chatHistory.messages, chatHistory.hintLevel, message, currentCode, currentAnswer
@@ -32,7 +37,7 @@ exports.sendChatMessage = async (req, res, next) => {
     chatHistory.messages.push({ role: 'assistant', content: aiResponse });
     await chatHistory.save();
 
-    res.json({ response: aiResponse, hintLevel: chatHistory.hintLevel });
+    res.json({ response: aiResponse, hintLevel: chatHistory.hintLevel, aiChatCount: chatHistory.aiChatCount });
   } catch (error) {
     next(error);
   }
@@ -45,7 +50,7 @@ exports.getChatHistory = async (req, res, next) => {
     const chatHistory = await ChatHistory.findOne({
       user: req.user._id, task: req.params.taskId
     });
-    res.json(chatHistory || { messages: [], hintLevel: 0 });
+    res.json(chatHistory || { messages: [], hintLevel: 0, aiChatCount: 0 });
   } catch (error) {
     next(error);
   }
@@ -63,7 +68,7 @@ exports.requestHint = async (req, res, next) => {
     });
     if (!chatHistory) {
       chatHistory = await ChatHistory.create({
-        user: req.user._id, task: task._id, messages: [], hintLevel: 0
+        user: req.user._id, task: task._id, messages: [], hintLevel: 0, aiChatCount: 0
       });
     }
 
@@ -81,6 +86,7 @@ exports.requestHint = async (req, res, next) => {
     res.json({
       hint: hintText,
       hintLevel: chatHistory.hintLevel,
+      aiChatCount: chatHistory.aiChatCount,
       message: `💡 **Hint ${chatHistory.hintLevel}:** ${hintText}`
     });
   } catch (error) {
