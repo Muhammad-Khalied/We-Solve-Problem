@@ -49,9 +49,14 @@ exports.getSubjectSkills = async (req, res, next) => {
           status: 'passed'
         }).distinct('task');
 
-        // Check if prerequisites are met
+        // Check if prerequisites are met based on accessMode
         let unlocked = true;
-        if (skill.prerequisites.length > 0) {
+        
+        if (skill.accessMode === 'locked') {
+          unlocked = false;
+        } else if (skill.accessMode === 'unlocked') {
+          unlocked = true;
+        } else if (skill.prerequisites && skill.prerequisites.length > 0) {
           for (const prereq of skill.prerequisites) {
             const prereqTasks = await Task.find({ skill: prereq._id || prereq });
             const prereqTaskIds = prereqTasks.map(t => t._id);
@@ -60,7 +65,10 @@ exports.getSubjectSkills = async (req, res, next) => {
               task: { $in: prereqTaskIds },
               status: 'passed'
             }).distinct('task');
-            if (prereqCompleted.length < prereqTasks.length) {
+            
+            // If the prerequisite has no tasks, it's considered completed. 
+            // If it has tasks, all must be completed.
+            if (prereqTasks.length > 0 && prereqCompleted.length < prereqTasks.length) {
               unlocked = false;
               break;
             }

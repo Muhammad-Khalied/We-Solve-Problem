@@ -112,6 +112,34 @@ exports.updateSkill = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
+exports.bulkUpdateSkills = async (req, res, next) => {
+  try {
+    const { skills } = req.body;
+    if (!skills || !Array.isArray(skills)) {
+      return res.status(400).json({ message: 'Invalid skills data' });
+    }
+
+    const updates = skills.map(skill => ({
+      updateOne: {
+        filter: { _id: skill._id },
+        update: { $set: { 
+          order: skill.order, 
+          accessMode: skill.accessMode, 
+          prerequisites: skill.prerequisites 
+        } }
+      }
+    }));
+
+    if (updates.length > 0) {
+      await Skill.bulkWrite(updates);
+    }
+    
+    res.json({ message: 'Roadmap updated successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.createTask = async (req, res, next) => {
   try {
     const task = await Task.create(req.body);

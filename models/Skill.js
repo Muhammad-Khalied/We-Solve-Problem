@@ -35,6 +35,11 @@ const skillSchema = new mongoose.Schema({
   totalTasks: {
     type: Number,
     default: 0
+  },
+  accessMode: {
+    type: String,
+    enum: ['auto', 'unlocked', 'locked'],
+    default: 'auto'
   }
 }, {
   timestamps: true
