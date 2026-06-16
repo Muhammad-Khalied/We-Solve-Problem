@@ -117,24 +117,26 @@ exports.getLeaderboard = async (req, res, next) => {
       ]);
 
       const userIds = submissions.map(s => s._id);
-      const users = await User.find({ _id: { $in: userIds } }).select('name avatar classSection');
+      const users = await User.find({ _id: { $in: userIds }, role: 'student' }).select('name avatar classSection');
       const userMap = {};
       users.forEach(u => { userMap[u._id.toString()] = u; });
 
       let currentRank = 1;
       let lastScore = -1;
-      students = submissions.map((s, index) => {
-        if (s.totalScore !== lastScore) {
-          currentRank = index + 1;
-          lastScore = s.totalScore;
-        }
-        return {
-          rank: currentRank,
-          user: userMap[s._id.toString()],
-          totalScore: s.totalScore,
-          tasksCompleted: s.tasksCompleted
-        };
-      });
+      students = submissions
+        .filter(s => userMap[s._id.toString()]) // exclude non-students (admins)
+        .map((s, index) => {
+          if (s.totalScore !== lastScore) {
+            currentRank = index + 1;
+            lastScore = s.totalScore;
+          }
+          return {
+            rank: currentRank,
+            user: userMap[s._id.toString()],
+            totalScore: s.totalScore,
+            tasksCompleted: s.tasksCompleted
+          };
+        });
 
       // Find current user rank for this subject if not in top 50 but > 0 score
       const userEntry = students.find(s => s.user && s.user._id.toString() === req.user._id.toString());

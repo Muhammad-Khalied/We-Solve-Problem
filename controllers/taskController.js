@@ -157,84 +157,93 @@ exports.submitTask = async (req, res, next) => {
       score = Math.round(task.points * ratio * 0.5); // partial credit
     }
 
-    // Upsert submission (keep the best score)
-    let submission;
-    if (existingSubmission) {
-      submission = await Submission.findOneAndUpdate(
-        { user: req.user._id, task: task._id },
-        {
-          $set: {
-            code: code || '',
-            mathAnswer: mathAnswer || '',
-            status: existingSubmission.score > score ? existingSubmission.status : status,
-            score: Math.max(existingSubmission.score, score),
-            hintsUsed,
-            testResults
-          },
-          $inc: { attempts: 1 }
-        },
-        { new: true }
-      );
-    } else {
-      submission = await Submission.create({
-        user: req.user._id,
-        task: task._id,
-        code: code || '',
-        mathAnswer: mathAnswer || '',
-        status,
-        score,
-        hintsUsed,
-        testResults,
-        attempts: 1
-      });
-    }
+    // Only persist submissions and update scores for students
+    // Admin can try tasks (sees test results) but doesn't get recorded
+    let submission = null;
+    let totalScore = 0;
 
-    // Update user's total score & streak
-    const allSubmissions = await Submission.find({ user: req.user._id, status: 'passed' });
-    const totalScore = allSubmissions.reduce((sum, s) => sum + s.score, 0);
-    req.user.totalScore = totalScore;
-    await req.user.updateStreak();
-    
-    // Save the user score to ensure it is stored in the DB (in case updateStreak didn't trigger a save)
-    if (req.user.isModified('totalScore')) {
-      await req.user.save();
+    if (req.user.role !== 'admin') {
+      // Upsert submission (keep the best score)
+      if (existingSubmission) {
+        submission = await Submission.findOneAndUpdate(
+          { user: req.user._id, task: task._id },
+          {
+            $set: {
+              code: code || '',
+              mathAnswer: mathAnswer || '',
+              status: existingSubmission.score > score ? existingSubmission.status : status,
+              score: Math.max(existingSubmission.score, score),
+              hintsUsed,
+              testResults
+            },
+            $inc: { attempts: 1 }
+          },
+          { new: true }
+        );
+      } else {
+        submission = await Submission.create({
+          user: req.user._id,
+          task: task._id,
+          code: code || '',
+          mathAnswer: mathAnswer || '',
+          status,
+          score,
+          hintsUsed,
+          testResults,
+          attempts: 1
+        });
+      }
+
+      // Update user's total score & streak
+      const allSubmissions = await Submission.find({ user: req.user._id, status: 'passed' });
+      totalScore = allSubmissions.reduce((sum, s) => sum + s.score, 0);
+      req.user.totalScore = totalScore;
+      await req.user.updateStreak();
+      
+      // Save the user score to ensure it is stored in the DB
+      if (req.user.isModified('totalScore')) {
+        await req.user.save();
+      }
     }
 
     res.json({
       submission: {
         status,
         score,
-        bestScore: submission.score,
-        attempts: submission.attempts,
+        bestScore: submission ? submission.score : score,
+        attempts: submission ? submission.attempts : 1,
         hintsUsed,
         testResults: testResults.map(r => ({
           passed: r.passed,
           input: r.input,
           expected: r.expected,
           actual: r.actual
-        }))
+        })),
+        isAdminPreview: req.user.role === 'admin'
       },
       totalScore
     });
 
-    // Track submission event (after response, non-blocking)
-    trackEvent(req.user._id, task._id, 'CODE_SUBMITTED', {
-      status,
-      score,
-      attempt: submission.attempts,
-      testsPassed: testResults.filter(r => r.passed).length,
-      totalTests: testResults.length,
-      hintsUsed,
-      taskType: task.type
-    }).catch(() => {});
-
-    // Track solution completed if passed
-    if (status === 'passed') {
-      trackEvent(req.user._id, task._id, 'SOLUTION_COMPLETED', {
+    // Track submission event (after response, non-blocking) — students only
+    if (req.user.role !== 'admin' && submission) {
+      trackEvent(req.user._id, task._id, 'CODE_SUBMITTED', {
+        status,
         score,
-        attempts: submission.attempts,
-        hintsUsed
+        attempt: submission.attempts,
+        testsPassed: testResults.filter(r => r.passed).length,
+        totalTests: testResults.length,
+        hintsUsed,
+        taskType: task.type
       }).catch(() => {});
+
+      // Track solution completed if passed
+      if (status === 'passed') {
+        trackEvent(req.user._id, task._id, 'SOLUTION_COMPLETED', {
+          score,
+          attempts: submission.attempts,
+          hintsUsed
+        }).catch(() => {});
+      }
     }
 
     // Track errors in failed submissions
