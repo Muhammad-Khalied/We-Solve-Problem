@@ -7,8 +7,12 @@ const {
   createTask, updateTask, deleteTask, getAllTasks
 } = require('../controllers/adminController');
 const {
-  contentAIChat, acceptGeneratedContent, acceptGeneratedTask
+  contentAIChat, acceptGeneratedContent, acceptGeneratedTask, uploadMaterialFile
 } = require('../controllers/contentAIController');
+
+// Multer config for file uploads (memory storage)
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
 // All admin routes require auth + admin role
 router.use(auth, admin);
@@ -28,6 +32,7 @@ router.delete('/tasks/:id', deleteTask);
 
 // Content AI Generator
 router.post('/content-ai/chat', contentAIChat);
+router.post('/content-ai/upload', upload.single('file'), uploadMaterialFile);
 router.post('/content-ai/accept', acceptGeneratedContent);
 router.post('/content-ai/accept-task', acceptGeneratedTask);
 

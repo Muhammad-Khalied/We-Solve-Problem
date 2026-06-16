@@ -2,6 +2,7 @@ const Task = require('../models/Task');
 const Skill = require('../models/Skill');
 const Subject = require('../models/Subject');
 const { generateContent } = require('../services/contentAIService');
+const pdfParse = require('pdf-parse');
 
 // @desc    Chat with content generator AI
 // @route   POST /api/admin/content-ai/chat
@@ -23,6 +24,37 @@ exports.contentAIChat = async (req, res, next) => {
     res.json(result);
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Upload educational material file (PDF, TXT, etc)
+// @route   POST /api/admin/content-ai/upload
+exports.uploadMaterialFile = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const { mimetype, buffer, originalname } = req.file;
+    let extractedText = '';
+
+    if (mimetype === 'application/pdf') {
+      const data = await pdfParse(buffer);
+      extractedText = data.text;
+    } else if (mimetype.startsWith('text/') || mimetype === 'application/json' || mimetype === 'text/csv' || originalname.endsWith('.md')) {
+      extractedText = buffer.toString('utf-8');
+    } else {
+      return res.status(400).json({ message: 'Unsupported file type. Please upload a PDF or text file.' });
+    }
+
+    if (!extractedText.trim()) {
+      return res.status(400).json({ message: 'Could not extract text from the file or the file is empty.' });
+    }
+
+    res.json({ text: extractedText.trim(), filename: originalname });
+  } catch (error) {
+    console.error('File parsing error:', error);
+    res.status(500).json({ message: 'Failed to parse file. Ensure it is a valid PDF or text file.' });
   }
 };
 
