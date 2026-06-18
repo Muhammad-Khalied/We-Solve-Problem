@@ -96,7 +96,45 @@ exports.getAnalytics = async (req, res, next) => {
   }
 };
 
-// @desc    Create/Update/Delete skills and tasks (CRUD)
+// @desc    Create/Update/Delete subjects, skills and tasks (CRUD)
+exports.createSubject = async (req, res, next) => {
+  try {
+    const subject = await Subject.create(req.body);
+    res.status(201).json(subject);
+  } catch (error) { next(error); }
+};
+
+exports.updateSubject = async (req, res, next) => {
+  try {
+    const subject = await Subject.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    if (!subject) return res.status(404).json({ message: 'Subject not found' });
+    res.json(subject);
+  } catch (error) { next(error); }
+};
+
+exports.deleteSubject = async (req, res, next) => {
+  try {
+    const subject = await Subject.findByIdAndDelete(req.params.id);
+    if (!subject) return res.status(404).json({ message: 'Subject not found' });
+    
+    // Find all skills associated with this subject
+    const skills = await Skill.find({ subject: subject._id });
+    const skillIds = skills.map(s => s._id);
+    
+    // Find all tasks associated with these skills
+    const tasks = await Task.find({ skill: { $in: skillIds } });
+    const taskIds = tasks.map(t => t._id);
+    
+    // Cascade delete skills, tasks, submissions, and chat histories
+    await Skill.deleteMany({ subject: subject._id });
+    await Task.deleteMany({ skill: { $in: skillIds } });
+    await Submission.deleteMany({ task: { $in: taskIds } });
+    await ChatHistory.deleteMany({ task: { $in: taskIds } });
+    
+    res.json({ message: 'Subject and all associated data deleted' });
+  } catch (error) { next(error); }
+};
+
 exports.createSkill = async (req, res, next) => {
   try {
     const skill = await Skill.create(req.body);

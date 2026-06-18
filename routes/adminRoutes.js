@@ -3,6 +3,7 @@ const auth = require('../middleware/auth');
 const admin = require('../middleware/admin');
 const {
   getAllStudents, getStudentDetails, getAnalytics,
+  createSubject, updateSubject, deleteSubject,
   createSkill, updateSkill, deleteSkill, bulkUpdateSkills,
   createTask, updateTask, deleteTask, getAllTasks
 } = require('../controllers/adminController');
@@ -22,6 +23,10 @@ router.get('/students/:id', getStudentDetails);
 router.get('/analytics', getAnalytics);
 
 // Subjects, Skills & Tasks Content Management
+router.post('/subjects', createSubject);
+router.put('/subjects/:id', updateSubject);
+router.delete('/subjects/:id', deleteSubject);
+
 router.post('/skills', createSkill);
 router.put('/skills/bulk-update', bulkUpdateSkills);
 router.put('/skills/:id', updateSkill);
